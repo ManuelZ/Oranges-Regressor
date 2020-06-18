@@ -7,7 +7,6 @@ from itertools import combinations
 import cv2
 import numpy as np
 from numpy.lib import recfunctions as rfn
-from scipy.spatial import distance as dist
 from imutils.perspective import four_point_transform
 from imutils.perspective import order_points
 from sklearn.neighbors import NearestNeighbors
@@ -20,11 +19,11 @@ from setup_logger import logger
 # Supress numpy scientific notation
 np.set_printoptions(precision=2, suppress=True, threshold=5)
 
-###############################################################################
-extension = ".jpg"
+#######################################################################
+ext = ".jpg"
 
-#filename = "or3-equator"
-filename = "or3-poles"
+equator_filename = "or3-equator"
+poles_filename = "or3-poles"
 
 # target_width = 1000
 target_width = 2448
@@ -132,7 +131,7 @@ def find_orange(im):
     return keypoints, float(2*orange_radius_px)
 
 
-def calculate_orange_real_diameter(ref_mm, ref_px, orange_diam_px, focal_length_px):
+def calc_orange_real_diam(ref_mm, ref_px, orange_diam_px, focal_length_px):
     orange_diam_mm = ref_mm * (orange_diam_px / ref_px ) * ( (2 * focal_length_px) / (2 * focal_length_px + orange_diam_px))
     return orange_diam_mm
 
@@ -185,7 +184,7 @@ def drawKeyPts(im, keypts, color, th):
     return im 
 
 
-def draw_line_with_long(im, pt1, pt2):
+def draw_line_with_long(im, pt1, pt2, mm_per_px):
     pt1, pt2 = tuple(pt1), tuple(pt2)
     cv2.line(im, pt1, pt2, color = (0,0,0), thickness = 2, lineType = cv2.LINE_8)
     x = int(pt1[0] + (pt2[0] - pt1[0]) / 2)
@@ -198,7 +197,7 @@ def draw_line_with_long(im, pt1, pt2):
                 color = (0,0,255), 
                 thickness = 5)
     cv2.putText(im,
-                text = f"{mm_per_px1 * euclidean(pt1,pt2):.0f}mm", 
+                text = f"{mm_per_px * euclidean(pt1,pt2):.0f}mm", 
                 org = (x, y + 50), 
                 fontFace = cv2.FONT_HERSHEY_SIMPLEX, 
                 fontScale = 1.5, 
@@ -206,130 +205,149 @@ def draw_line_with_long(im, pt1, pt2):
                 thickness = 5)
 
 
-processer = Processer(f'{filename}{extension}', target_width, CAL_MTX, DIST, debug=DEBUG)
+def estimate_volume(equator_filename, poles_filename):
+    """
+    Args:
+        equator_filename
+        poles_filename
+    Returns:
+        
+    """
+    diameters = []
+    for fn in equator_filename, poles_filename:
+        processer = \
+            Processer(f'{fn}{ext}', target_width, CAL_MTX, DIST, debug=DEBUG)
 
-###############################################################################
-# Find Orange
-###############################################################################
-(
-    processer
-        .resize()
-        .blur(3)
-        #.show("Orange")
-        .undistort()
-        #.show("Orange")
-        #.extract_page()
-        #.show("Orange")
-        .to_hsv()
-        #.show("Orange")
-        .filter_by_hsv_color(lowHSV=[0, 0, 62], highHSV=[148, 68, 255])
-        #.show("Orange")
-        .negate()
-        #.show("Orange")
-        .open(size=10, iterations=2, element='circle')
-        .close(size=10, iterations=2, element='circle')
-        #.show("Orange")
-)
-im = processer.get_processed_image()
-orange_kpts, orange_diam_px = find_orange(im)
-orange_centroids = np.array([kp.pt for kp in orange_kpts])
+        #######################################################################
+        # Find Orange
+        #######################################################################
+        (
+            processer
+                .resize()
+                .blur(3)
+                #.show("Orange")
+                .undistort()
+                #.show("Orange")
+                #.extract_page()
+                #.show("Orange")
+                .to_hsv()
+                #.show("Orange")
+                .filter_by_hsv_color(lowHSV=[0, 0, 62], highHSV=[148, 68, 255])
+                #.show("Orange")
+                .negate()
+                #.show("Orange")
+                .open(size=10, iterations=2, element='circle')
+                .close(size=10, iterations=2, element='circle')
+                #.show("Orange")
+        )
+        im = processer.get_processed_image()
+        orange_kpts, orange_diam_px = find_orange(im)
+        orange_centroids = np.array([kp.pt for kp in orange_kpts])
 
-###############################################################################
-# Find squares
-###############################################################################
-(
-    processer
-        .reset()
-        .resize()
-        .blur(3)
-        #.show('Squares')
-        .undistort()
-        #.show('Squares')
-        #.extract_page()
-        #.show('Squares')
-        .to_gray()
-        #.show('Squares')
-        .binarize(method='otsu')
-        #.show('Squares')
-        .open(size=10, iterations=2, element='rectangle')
-        .close(size=5, iterations=5, element='rectangle')
-        #.show('Squares')
-)
-im = processer.get_processed_image()
-squares_kpts = find_squares(im)
-squares_centroids = np.array([kp.pt for kp in squares_kpts])
+        #######################################################################
+        # Find squares
+        #######################################################################
+        (
+            processer
+                .reset()
+                .resize()
+                .blur(3)
+                #.show('Squares')
+                .undistort()
+                #.show('Squares')
+                #.extract_page()
+                #.show('Squares')
+                .to_gray()
+                #.show('Squares')
+                .binarize(method='otsu')
+                #.show('Squares')
+                .open(size=10, iterations=2, element='rectangle')
+                .close(size=5, iterations=5, element='rectangle')
+                #.show('Squares')
+        )
+        im = processer.get_processed_image()
+        squares_kpts = find_squares(im)
+        squares_centroids = np.array([kp.pt for kp in squares_kpts])
 
-#
-# Length and Width
-#
-l,w = get_reference_length_and_width(squares_centroids)
-logger.info(f'length: {l:.1f} px; width: {w:.1f} px')
-
-
-###############################################################################
-# Transform pixels to mm
-###############################################################################
-mm_per_px1 = REAL_L / l
-mm_per_px2 = REAL_W / w
-logger.debug(f'Reference [mm]: {REAL_L:.1f} mm')
-logger.debug(f'Reference [px]: {l:.1f} px')
-logger.debug(f'Image orange diameter: {orange_diam_px:.1f} px')
-logger.debug(f'Focal length: {FOCAL_LENGTH_PX:.1f} px')
-# logger.debug(f'{mm_per_px1:.4f} mm per px.')
-# logger.debug(f'{mm_per_px2:.4f} mm per px.')
-# logger.debug(f'Less than {1 - mm_per_px1/mm_per_px2:.2%} of difference between them.')
-
-orange_diameter = calculate_orange_real_diameter(ref_mm=REAL_L, ref_px=l, orange_diam_px=orange_diam_px, focal_length_px=FOCAL_LENGTH_PX)
-orange_volume = calculate_orange_volume(orange_diameter)
-
-logger.info(f'Estimated real orange diameter: {orange_diameter:.1f} mm')
-logger.info(f'Estimated real orange volume: {orange_volume:.1f} ml')
+        #
+        # Length and Width
+        #
+        l,w = get_reference_length_and_width(squares_centroids)
+        logger.info(f'length: {l:.1f} px; width: {w:.1f} px')
 
 
-###############################################################################
-# Draw
-###############################################################################
-im = (processer
-          .reset()
-          .resize()
-          .undistort()
-          #.extract_page()
-          .get_processed_image()
-     )
+        #######################################################################
+        # Transform pixels to mm
+        #######################################################################
+        mm_per_px1 = REAL_L / l
+        mm_per_px2 = REAL_W / w
+        logger.debug(f'Reference [mm]: {REAL_L:.1f} mm')
+        logger.debug(f'Reference [px]: {l:.1f} px')
+        logger.debug(f'Image orange diameter: {orange_diam_px:.1f} px')
+        logger.debug(f'Focal length: {FOCAL_LENGTH_PX:.1f} px')
 
-# Mark the squares and orange
-im_with_keypoints = drawKeyPts(im, orange_kpts, (0,0,255), 10)
-im_with_keypoints = cv2.drawKeypoints(im_with_keypoints, squares_kpts, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS) 
+        orange_diameter = calc_orange_real_diam(ref_mm=REAL_L, 
+                                                ref_px=l, 
+                                                orange_diam_px=orange_diam_px, 
+                                                focal_length_px=FOCAL_LENGTH_PX)
 
- 
-# Draw squares locations
-for kp in squares_kpts:
-    cv2.putText(im_with_keypoints,
-                text = f"{kp.pt[0]:.0f}, {kp.pt[1]:.0f}", 
-                org = (int(kp.pt[0] - 30), int(kp.pt[1] - 30)), 
-                fontFace = cv2.FONT_HERSHEY_SIMPLEX, 
-                fontScale = 1.5, 
-                color = (0,0,255), 
-                thickness = 5)
+        logger.info(f'Estimated real orange diameter: {orange_diameter:.1f} mm')
 
-# Draw lines between squares
-tl, tr, br, bl = order_points(squares_centroids)
-draw_line_with_long(im_with_keypoints, tl, tr)
-draw_line_with_long(im_with_keypoints, br, tr)
-draw_line_with_long(im_with_keypoints, bl, br)
-draw_line_with_long(im_with_keypoints, bl, tl)
+        #######################################################################
+        # Draw
+        #######################################################################
+        im = (
+                processer
+                    .reset()
+                    .resize()
+                    .undistort()
+                    #.extract_page()
+                    .get_processed_image()
+            )
+
+        # Mark the squares and orange
+        im_with_keypoints = drawKeyPts(im, orange_kpts, (0,0,255), 10)
+        im_with_keypoints = \
+            cv2.drawKeypoints(im_with_keypoints, squares_kpts, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS) 
+
+        # Draw squares locations
+        for kp in squares_kpts:
+            cv2.putText(im_with_keypoints,
+                        text = f"{kp.pt[0]:.0f}, {kp.pt[1]:.0f}", 
+                        org = (int(kp.pt[0] - 30), int(kp.pt[1] - 30)), 
+                        fontFace = cv2.FONT_HERSHEY_SIMPLEX, 
+                        fontScale = 1.5, 
+                        color = (0,0,255), 
+                        thickness = 5)
+
+        # Draw lines between squares
+        tl, tr, br, bl = order_points(squares_centroids)
+        draw_line_with_long(im_with_keypoints, tl, tr, mm_per_px1)
+        draw_line_with_long(im_with_keypoints, br, tr, mm_per_px1)
+        draw_line_with_long(im_with_keypoints, bl, br, mm_per_px1)
+        draw_line_with_long(im_with_keypoints, bl, tl, mm_per_px1)
+
+        # Draw orange diameter
+        orange_diam_text_x = int(orange_centroids[0][0])
+        orange_diam_text_y = int(orange_centroids[0][1] - (orange_diam_px / 2) - 10)
+        cv2.putText(im_with_keypoints,
+                    text = f"{orange_diameter:.1f} mm", 
+                    org = (orange_diam_text_x, orange_diam_text_y), 
+                    fontFace = cv2.FONT_HERSHEY_SIMPLEX, 
+                    fontScale = 3.5, 
+                    color = (0,0,255), 
+                    thickness = 5)
+
+        cv2.imwrite(f'{fn}-out{ext}', im_with_keypoints)
+        diameters.append(orange_diameter)
+        logger.info(f'Finished with one orange.\n')
     
+    ###########################################################################
+    # FINAL CALC
+    ###########################################################################
+    orange_volume = calculate_orange_volume(diameters[0], diameters[1])
+    logger.info(f'Estimated real orange volume: {orange_volume:.1f} ml')
 
-# Draw orange diameter
-cv2.putText(im_with_keypoints,
-            text = f"{orange_diameter:.1f} mm", 
-            org = (int(orange_centroids[0][0]), int(orange_centroids[0][1] - (orange_diam_px / 2) - 10 )), 
-            fontFace = cv2.FONT_HERSHEY_SIMPLEX, 
-            fontScale = 3.5, 
-            color = (0,0,255), 
-            thickness = 5)
 
-cv2.imwrite(f'{filename}-out{extension}', im_with_keypoints)
-#cv2.imshow("Squares and orange", im_with_keypoints)
-#cv2.waitKey(0)
-
+if __name__ == '__main__':
+    estimate_volume(equator_filename, poles_filename)
