@@ -15,41 +15,23 @@ from scipy.spatial.distance import euclidean
 
 # Local imports
 from setup_logger import logger
+from config import CAL_MTX
+from config import DIST
+from config import TARGET_WIDTH
+from config import FOCAL_LENGTH_PX
+from config import REAL_L, REAL_W
+from config import DEBUG
+from config import EXT
+from exceptions import BlobError
 
 # Supress numpy scientific notation
 np.set_printoptions(precision=2, suppress=True, threshold=5)
 
-#######################################################################
-ext = ".jpg"
+###############################################################################
 
 equator_filename = "or3-equator"
 poles_filename = "or3-poles"
 
-# target_width = 1000
-target_width = 2448
-
-DEBUG = False
-
-REAL_L, REAL_W = 240,150 # milimeters
-
-# Matlab
-fx, fy = 2.9496e+03, 2.9535e+03 
-FOCAL_LENGTH_PX = np.mean([fx,fy])
-# Opencv
-#fx, fy = 2.59010722e+03, 2.58287227e+03 
-
-CAL_MTX = np.array([[fx, 0, 1.64003469e+03],
-                    [0, fy, 1.20986771e+03],
-                    [0, 0, 1]])
-
-DIST = np.array([[9.81063604e-02, -3.04860599e-01, 3.62797741e-04, 3.14197889e-04, 3.30625745e-01]])
-
-
-class BlobError(Exception):
-    """ Raised when a blob is a point"""
-    def __str__(self):
-        return "One of the found blobs is a point or almost one."
-  
 
 def find_squares(im):
     """
@@ -208,15 +190,16 @@ def draw_line_with_long(im, pt1, pt2, mm_per_px):
 def estimate_volume(equator_filename, poles_filename):
     """
     Args:
-        equator_filename
-        poles_filename
+        equator_filename:
+        poles_filename: 
+    
     Returns:
         
     """
     diameters = []
     for fn in equator_filename, poles_filename:
         processer = \
-            Processer(f'{fn}{ext}', target_width, CAL_MTX, DIST, debug=DEBUG)
+            Processer(f'{fn}{EXT}', TARGET_WIDTH, CAL_MTX, DIST, debug=DEBUG)
 
         #######################################################################
         # Find Orange
@@ -308,7 +291,9 @@ def estimate_volume(equator_filename, poles_filename):
         # Mark the squares and orange
         im_with_keypoints = drawKeyPts(im, orange_kpts, (0,0,255), 10)
         im_with_keypoints = \
-            cv2.drawKeypoints(im_with_keypoints, squares_kpts, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS) 
+            cv2.drawKeypoints(im_with_keypoints, squares_kpts, np.array([]), 
+                              (0,255,0), 
+                              cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS) 
 
         # Draw squares locations
         for kp in squares_kpts:
@@ -338,7 +323,7 @@ def estimate_volume(equator_filename, poles_filename):
                     color = (0,0,255), 
                     thickness = 5)
 
-        cv2.imwrite(f'{fn}-out{ext}', im_with_keypoints)
+        cv2.imwrite(f'{fn}-out{EXT}', im_with_keypoints)
         diameters.append(orange_diameter)
         logger.info(f'Finished with one orange.\n')
     
