@@ -1,20 +1,27 @@
 # Built-in imports
 import random
-
+import sys
 # External imports
 import numpy as np
 import cv2
 import vispy.scene
 from vispy.color import ColorArray
-
+import argparse
 """
 Modified from:
 https://stackoverflow.com/a/53405157/1253729
 """
 
+
+
 if __name__ == '__main__':
     
-    im = cv2.imread('or4-poles.jpg')
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-i", "--image", required=True, type=str, help="Filename of input image")
+    ap.add_argument("-c", "--colormap", required=True, type=str, help="Either rgb or hsv")
+    args = vars(ap.parse_args())
+
+    im = cv2.imread(args['image'])
     
     # Resize image
     target_width = 300
@@ -23,23 +30,34 @@ if __name__ == '__main__':
     im = cv2.resize(im, dim, interpolation = cv2.INTER_LINEAR_EXACT)
     
     N = im.shape[0] * im.shape[1] # Number of points
-    b, g, r = cv2.split(im)
-    
-    r = r.reshape((N, 1)).astype(np.uint8)
-    g = g.reshape((N, 1)).astype(np.uint8)
-    b = b.reshape((N, 1)).astype(np.uint8)
 
+    if args['colormap'] == 'rgb':
+        b,g,r = cv2.split(im)
+        x,y,z = r,g,b
+    elif args['colormap'] == 'hsv':
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+        h,s,v = cv2.split(im)
+        x,y,z = h,s,v
+    else:
+        print(f'Only valid colormaps are RGB and HSV')
+        sys.exit()
+
+
+    x = x.reshape((N, 1)).astype(np.uint8)
+    y = y.reshape((N, 1)).astype(np.uint8)
+    z = z.reshape((N, 1)).astype(np.uint8)
+    
     # Vispy
     Scatter3D = vispy.scene.visuals.create_visual_node(vispy.visuals.MarkersVisual)
 
     canvas = vispy.scene.SceneCanvas(keys='interactive', show=True)
     view = canvas.central_widget.add_view()
     # SHIFT + LMB to translate the center point
-    view.camera = 'arcball'  # 'base', 'arcball', 'turntable', 'panzoom', 'fly'
+    view.camera = 'turntable' # 'base', 'arcball', 'turntable', 'panzoom', 'fly'
     view.camera.distance = 2
 
-    pos = np.concatenate([r,g,b], axis=1) / 255
-    colors = np.concatenate([r,g,b], axis=1) / 255
+    pos = np.concatenate([x,y,z], axis=1) / 255
+    colors = ColorArray(color_space=args['colormap'], color=(np.concatenate([x,y,z], axis=1) / 255))
     sizes = 5 * np.ones((N,1))
 
     p1 = Scatter3D(parent=view.scene)
