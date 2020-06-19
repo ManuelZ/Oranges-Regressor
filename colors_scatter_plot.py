@@ -4,8 +4,8 @@ import random
 # External imports
 import numpy as np
 import cv2
-from mayavi import mlab
-from mayavi.mlab import quiver3d, draw
+import vispy.scene
+from vispy.color import ColorArray
 
 """
 Modified from:
@@ -28,18 +28,29 @@ if __name__ == '__main__':
     r = r.reshape((N, 1)).astype(np.uint8)
     g = g.reshape((N, 1)).astype(np.uint8)
     b = b.reshape((N, 1)).astype(np.uint8)
-    alpha = 255 * np.ones((N, 1))
 
-    colors = np.concatenate([r, g, b, alpha], axis=1).astype(np.uint8)
-    x, y, z = colors[:,0], colors[:,1], colors[:,2] 
+    # Vispy
+    Scatter3D = vispy.scene.visuals.create_visual_node(vispy.visuals.MarkersVisual)
 
-    pts = mlab.pipeline.scalar_scatter(x, y, z)
-    pts.add_attribute(colors, 'colors') # assign the colors to each point
-    pts.data.point_data.set_active_scalars('colors')
+    canvas = vispy.scene.SceneCanvas(keys='interactive', show=True)
+    view = canvas.central_widget.add_view()
+    # SHIFT + LMB to translate the center point
+    view.camera = 'arcball'  # 'base', 'arcball', 'turntable', 'panzoom', 'fly'
+    view.camera.distance = 2
 
-    g = mlab.pipeline.glyph(pts)
-    g.glyph.glyph.scale_factor = 1 # set scaling for all the points
-    g.glyph.scale_mode = 'data_scaling_off' # make all the points same size
+    pos = np.concatenate([r,g,b], axis=1) / 255
+    colors = np.concatenate([r,g,b], axis=1) / 255
+    sizes = 5 * np.ones((N,1))
 
-    mlab.outline()
-    mlab.show()
+    p1 = Scatter3D(parent=view.scene)
+    p1.set_gl_state('translucent', blend=True, depth_test=True)
+    p1.set_data(pos,
+                face_color=colors,
+                symbol='o',
+                size=sizes[:,0],
+                edge_width=0.5, 
+                edge_color=None
+    )
+
+    axis = vispy.scene.visuals.XYZAxis(parent=view.scene)
+    vispy.app.run()
