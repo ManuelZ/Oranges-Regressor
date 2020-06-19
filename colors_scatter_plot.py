@@ -60,7 +60,7 @@ if __name__ == '__main__':
         color3 = altitude
 
     else:
-        print(f'Only valid colormaps are RGB and HSV')
+        print(f"Only valid colormaps are 'rgb' and 'hsv'")
         sys.exit()
 
     x = x.reshape((N, 1))
