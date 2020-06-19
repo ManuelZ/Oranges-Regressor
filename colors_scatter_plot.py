@@ -1,17 +1,13 @@
 # Built-in imports
 import random
 import sys
+import argparse
+
 # External imports
-import numpy as np
 import cv2
+import numpy as np
 import vispy.scene
 from vispy.color import ColorArray
-import argparse
-"""
-Modified from:
-https://stackoverflow.com/a/53405157/1253729
-"""
-
 
 
 if __name__ == '__main__':
