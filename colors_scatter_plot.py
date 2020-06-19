@@ -9,10 +9,8 @@ from mayavi.mlab import quiver3d, draw
 
 """
 Modified from:
-https://github.com/enthought/mayavi/issues/92
+https://stackoverflow.com/a/53405157/1253729
 """
-
-mlab.options.backend = 'envisage'
 
 if __name__ == '__main__':
     
@@ -25,22 +23,23 @@ if __name__ == '__main__':
     im = cv2.resize(im, dim, interpolation = cv2.INTER_LINEAR_EXACT)
     
     N = im.shape[0] * im.shape[1] # Number of points
-    ones = np.ones(N)
-    scalars = np.arange(N) # Key point: set an integer for each point
-    
     b, g, r = cv2.split(im)
-    alpha = (255 * np.ones((r.size, 1))).astype(np.uint8)
-    r = r.reshape((r.size, 1)).astype(np.uint8)
-    g = g.reshape((g.size, 1)).astype(np.uint8)
-    b = b.reshape((b.size, 1)).astype(np.uint8)
+    
+    r = r.reshape((N, 1)).astype(np.uint8)
+    g = g.reshape((N, 1)).astype(np.uint8)
+    b = b.reshape((N, 1)).astype(np.uint8)
+    alpha = 255 * np.ones((N, 1))
+
     colors = np.concatenate([r, g, b, alpha], axis=1).astype(np.uint8)
-
     x, y, z = colors[:,0], colors[:,1], colors[:,2] 
-    pts = quiver3d(x, y, z, ones, ones, ones, scalars=scalars, mode='sphere', scale_factor=1) # Create points
-    pts.glyph.color_mode = 'color_by_scalar'
 
-    # Set look-up table and redraw
-    pts.module_manager.scalar_lut_manager.lut.table = colors
+    pts = mlab.pipeline.scalar_scatter(x, y, z)
+    pts.add_attribute(colors, 'colors') # assign the colors to each point
+    pts.data.point_data.set_active_scalars('colors')
+
+    g = mlab.pipeline.glyph(pts)
+    g.glyph.glyph.scale_factor = 1 # set scaling for all the points
+    g.glyph.scale_mode = 'data_scaling_off' # make all the points same size
+
     mlab.outline()
-    draw()
     mlab.show()
