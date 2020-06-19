@@ -1,11 +1,11 @@
-import numpy as np
-from tvtk.api import tvtk
-from mayavi.scripts import mayavi2
-import vispy.scene
+# Built-in imports
 import random
+
+# External imports
+import numpy as np
+import cv2
 from mayavi import mlab
 from mayavi.mlab import quiver3d, draw
-import cv2
 
 """
 Modified from:
