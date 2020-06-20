@@ -1,28 +1,44 @@
-"""
-MODIFIED FROM
-https://www.bluetin.io/opencv/opencv-color-detection-filtering-python/
-"""
+# Built-in imports
 import argparse
 import sys
+
+# External imports
 import cv2
 import numpy as np
 import cvui
 
-# TODO: Try the CIE L*a*b* colorspace. cv2.COLOR_BGR2LAB
-# This outputs 0≤L≤100, −127≤a≤127, −127≤b≤127 .
-# HSV: OpenCV uses HSV ranges between (H:0-180, S:0-255, V:0-255)
 
+ap = argparse.ArgumentParser()
+ap.add_argument("-i", "--image", required=True, type=str, help="Filename of input image")
+ap.add_argument("-c", "--colorspace", required=True, type=str, choices=['hsv', 'lab'], help="Colorspace to use")
+args = vars(ap.parse_args())
+
+cs = args['colorspace']
 WINDOW_NAME	= 'Trackbar and columns'
+width = 100 # Size of trackbars
+space = 3 # inter elements space
 
-lowHue = [0]
-lowSat = [0]
-lowVal = [0]
-highHue = [255]
-highSat = [110]
-highVal = [255]
+if cs == 'hsv':
+    # Vars that capture the set value in the trackbars and define the initial values
+    lowCh0, highCh0 = [0], [255] # H
+    lowCh1, highCh1 = [0], [110] # S
+    lowCh2, highCh2 = [0], [255] # V
 
-# Size of trackbars
-width = 100
+    # HSV ranges: (H:0-180, S:0-255, V:0-255)
+    limitsCh0 = [0, 180]
+    limitsCh1 = [0, 255]
+    limitsCh2 = [0, 255]
+
+elif cs == 'lab':
+    # Vars that capture the set value in the trackbars and define the initial values
+    lowCh0, highCh0 = [0], [255] # L
+    lowCh1, highCh1 = [0], [255] # a
+    lowCh2, highCh2 = [0], [135] # b
+
+    # OpenCV CIE Lab ranges for 8 bit images
+    limitsCh0 = [0, 255]
+    limitsCh1 = [0, 255]
+    limitsCh2 = [0, 255]
 
 # Init cvui and tell it to use a value of 20 for cv2.waitKey()
 # because we want to enable keyboard shortcut for
@@ -30,11 +46,6 @@ width = 100
 # If cvui has a value for waitKey, it will call
 # waitKey() automatically for us within cvui.update().
 cvui.init(WINDOW_NAME, 20)
-
-
-ap = argparse.ArgumentParser()
-ap.add_argument("-i", "--image", required=True, type=str, help="Filename of input image")
-args = vars(ap.parse_args())
 
 original_im = cv2.imread(args['image'])
 
@@ -44,25 +55,27 @@ ratio = target_width / original_im.shape[1]
 dim = (int(target_width), int(original_im.shape[0] * ratio))
 im = cv2.resize(original_im, dim, interpolation = cv2.INTER_LINEAR_EXACT)
 
+# Will hold the transformed image and the GUI
 frame = np.zeros(im.shape, np.uint8)
 
 while True:
     ###########################################################################
     # BLUR
     ###########################################################################
-    # Blur methods available, comment or uncomment to try different blur methods.
     frameBGR = cv2.GaussianBlur(im, (7, 7), 0)
 
     ###########################################################################
-    # HSV COLORSPACE
+    # COLORSPACE
     ###########################################################################
-    hsv = cv2.cvtColor(frameBGR, cv2.COLOR_BGR2HSV)
+    if cs == 'hsv':
+        transformed = cv2.cvtColor(frameBGR, cv2.COLOR_BGR2HSV)
+    elif cs == 'lab':
+        transformed = cv2.cvtColor(frameBGR, cv2.COLOR_BGR2LAB)
     
-    # HSV values to define a colour range.
-    colorLow = np.array([lowHue,lowSat,lowVal])
-    colorHigh = np.array([highHue,highSat,highVal])
-    mask = cv2.inRange(hsv, colorLow, colorHigh)
-    h, s, v = cv2.split(hsv)
+    # Colorspace values  define a color range
+    colorLow = np.array([lowCh0, lowCh1, lowCh2])
+    colorHigh = np.array([highCh0, highCh1, highCh2])
+    mask = cv2.inRange(transformed, colorLow, colorHigh)
 
     ###########################################################################
     # MORPHOLOGY
@@ -87,22 +100,30 @@ while True:
     ###########################################################################
     # Render the settings window to house the checkbox and the trackbars below
     cvui.window(frame, 10, 10, 200, 250, 'Settings')
+    options = cvui.TRACKBAR_DISCRETE | cvui.TRACKBAR_HIDE_SEGMENT_LABELS
     
     cvui.beginColumn(frame, 10, 40, -1, -1, 6)
-    
-    options = cvui.TRACKBAR_DISCRETE | cvui.TRACKBAR_HIDE_SEGMENT_LABELS
 
-    cvui.text('Hue low')
-    cvui.trackbar(width, lowHue, 0, 180, 10, '%.0Lf', options, 1)
-    cvui.space(5)
+    if cs == 'hsv':
+        cvui.text('Hue low')
+    elif cs == 'lab':
+        cvui.text('L low')
+    cvui.trackbar(width, lowCh0, limitsCh0[0], limitsCh0[1], 10, '%.0Lf', options, 1)
+    cvui.space(space)
 
-    cvui.text('Sat low')
-    cvui.trackbar(width, lowSat, 0, 255, 10, '%.0Lf', options, 1)
-    cvui.space(5)
+    if cs == 'hsv':
+        cvui.text('Sat low')
+    elif cs == 'lab':
+        cvui.text('a* low')
+    cvui.trackbar(width, lowCh1, limitsCh1[0], limitsCh1[1], 10, '%.0Lf', options, 1)
+    cvui.space(space)
 
-    cvui.text('Value low')
-    cvui.trackbar(width, lowVal, 0, 255, 10, '%.0Lf', options, 1)
-    cvui.space(5)
+    if cs == 'hsv':
+        cvui.text('Val low')
+    elif cs == 'lab':
+        cvui.text('b* low')
+    cvui.trackbar(width, lowCh2, limitsCh2[0], limitsCh2[1], 10, '%.0Lf', options, 1)
+    cvui.space(space)
 
     cvui.endColumn()
 
@@ -110,17 +131,26 @@ while True:
     # SECOND COLUMN
     ###########################################################################
     cvui.beginColumn(frame, 110, 40, -1, -1, 6)
-    cvui.text('Hue high')
-    cvui.trackbar(width, highHue, 0, 180, 10, '%.0Lf', options, 1)
-    cvui.space(5)
+    if cs == 'hsv':
+        cvui.text('Hue high')
+    elif cs == 'lab':
+        cvui.text('L high')
+    cvui.trackbar(width, highCh0, limitsCh0[0], limitsCh0[1], 10, '%.0Lf', options, 1)
+    cvui.space(space)
 
-    cvui.text('Sat high')
-    cvui.trackbar(width, highSat, 0, 255, 10, '%.0Lf', options, 1)
-    cvui.space(5)
+    if cs == 'hsv':
+        cvui.text('Sat high')
+    elif cs == 'lab':
+        cvui.text('a* high')
+    cvui.trackbar(width, highCh1, limitsCh1[0], limitsCh1[1], 10, '%.0Lf', options, 1)
+    cvui.space(space)
 
-    cvui.text('Value high')
-    cvui.trackbar(width, highVal, 0, 255, 10, '%.0Lf', options, 1)
-    cvui.space(5)
+    if cs == 'hsv':
+        cvui.text('Val high')
+    elif cs == 'lab':
+        cvui.text('b* high')
+    cvui.trackbar(width, highCh2, limitsCh2[0], limitsCh2[1], 10, '%.0Lf', options, 1)
+    cvui.space(space)
 
     cvui.endColumn()
 
