@@ -2,6 +2,7 @@
 import sys
 import logging
 from itertools import combinations
+import argparse
 
 # External imports
 import cv2
@@ -22,15 +23,13 @@ from config import FOCAL_LENGTH_PX
 from config import REAL_L, REAL_W
 from config import DEBUG
 from config import EXT
+from config import HSV_LOW, HSV_HIGH
 from exceptions import BlobError
 
 # Supress numpy scientific notation
 np.set_printoptions(precision=2, suppress=True, threshold=5)
 
 ###############################################################################
-
-equator_filename = "or3-equator"
-poles_filename = "or3-poles"
 
 
 def find_squares(im):
@@ -63,13 +62,13 @@ def find_squares(im):
         # remove duplicate groups
         results = np.array([list(item) for item in set(frozenset(item) for item in indices)])
         
-        # Select the best group by minimizing the std
-        k = np.inf
+        # Select the best group by minimizing the sum of std
+        min_std = np.inf
         selected = None
         for group in results:
             d = np.std(unstructured[group], axis=0).sum()
-            if d < k:
-                k = d
+            if d < min_std:
+                min_std = d
                 selected = group
         logger.debug(f'Selected group is: {selected}')
     else:
@@ -82,6 +81,9 @@ def find_squares(im):
 
 
 def find_orange(im):
+
+    # TODO: use Canny or change the HSV range
+
     logger.info(f'Searching orange...')
     num_labels, labels, stats, centroids = \
         cv2.connectedComponentsWithStats(im, connectivity=8)
@@ -89,8 +91,10 @@ def find_orange(im):
     labels = labels.astype(np.uint8)
     areas = stats[:,4]
     
+    # Find the blob with the max circularity
     max_circularity = -np.inf
     selected_idx = None
+    orange_blob = None
     for i in range(num_labels):
         blob = labels.copy()
         blob[np.where(blob == i)] = 255
@@ -100,17 +104,20 @@ def find_orange(im):
             if circularity > max_circularity:
                 max_circularity = circularity
                 selected_idx = i
+                orange_blob = blob
         except BlobError:
             pass
+    
+    _, contours, _ = cv2.findContours(orange_blob, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    ellipse_center, ellipse_size, ellipse_angle = cv2.fitEllipse(contours[0])
+    empty_canvas = np.zeros(orange_blob.shape)
 
     orange_centroid = centroids[selected_idx]
-    orange_area_px = areas[selected_idx]
-    logger.info(f'Orange area (px): {orange_area_px} px')
-    orange_radius_px = np.sqrt(orange_area_px / np.pi)
+    orange_min_radius_px = np.min(ellipse_size) / 2
     keypoints = [cv2.KeyPoint(x=orange_centroid[0], 
                               y=orange_centroid[1], 
-                              _size=2*orange_radius_px)]
-    return keypoints, float(2*orange_radius_px)
+                              _size=2*orange_min_radius_px)]
+    return keypoints, float(2*orange_min_radius_px)
 
 
 def calc_orange_real_diam(ref_mm, ref_px, orange_diam_px, focal_length_px):
@@ -208,20 +215,18 @@ def estimate_volume(equator_filename, poles_filename):
             processer
                 .resize()
                 .blur(3)
-                #.show("Orange")
+                .show("Orange")
                 .undistort()
-                #.show("Orange")
-                #.extract_page()
-                #.show("Orange")
+                .show("Orange")
                 .to_hsv()
-                #.show("Orange")
-                .filter_by_hsv_color(lowHSV=[0, 0, 62], highHSV=[148, 68, 255])
-                #.show("Orange")
+                .show("Orange")
+                .filter_by_hsv_color(lowHSV=HSV_LOW, highHSV=HSV_HIGH)
+                .show("Orange")
                 .negate()
-                #.show("Orange")
-                .open(size=10, iterations=2, element='circle')
-                .close(size=10, iterations=2, element='circle')
-                #.show("Orange")
+                .show("Orange")
+                .open(size=10, iterations=5, element='circle')
+                .close(size=10, iterations=5, element='circle')
+                .show("Orange")
         )
         im = processer.get_processed_image()
         orange_kpts, orange_diam_px = find_orange(im)
@@ -238,13 +243,11 @@ def estimate_volume(equator_filename, poles_filename):
                 #.show('Squares')
                 .undistort()
                 #.show('Squares')
-                #.extract_page()
-                #.show('Squares')
                 .to_gray()
                 #.show('Squares')
                 .binarize(method='otsu')
                 #.show('Squares')
-                .open(size=10, iterations=2, element='rectangle')
+                .open(size=10, iterations=5, element='rectangle')
                 .close(size=5, iterations=5, element='rectangle')
                 #.show('Squares')
         )
@@ -256,7 +259,7 @@ def estimate_volume(equator_filename, poles_filename):
         # Length and Width
         #
         l,w = get_reference_length_and_width(squares_centroids)
-        logger.info(f'length: {l:.1f} px; width: {w:.1f} px')
+        logger.debug(f'Squares length: {l:.1f} px; Squares width: {w:.1f} px')
 
 
         #######################################################################
@@ -274,7 +277,7 @@ def estimate_volume(equator_filename, poles_filename):
                                                 orange_diam_px=orange_diam_px, 
                                                 focal_length_px=FOCAL_LENGTH_PX)
 
-        logger.info(f'Estimated real orange diameter: {orange_diameter:.1f} mm')
+        logger.debug(f'Estimated real orange diameter: {orange_diameter:.1f} mm')
 
         #######################################################################
         # Draw
@@ -284,7 +287,6 @@ def estimate_volume(equator_filename, poles_filename):
                     .reset()
                     .resize()
                     .undistort()
-                    #.extract_page()
                     .get_processed_image()
             )
 
@@ -332,7 +334,18 @@ def estimate_volume(equator_filename, poles_filename):
     ###########################################################################
     orange_volume = calculate_orange_volume(diameters[0], diameters[1])
     logger.info(f'Estimated real orange volume: {orange_volume:.1f} ml')
+    return orange_volume
 
 
 if __name__ == '__main__':
-    estimate_volume(equator_filename, poles_filename)
+    # ap = argparse.ArgumentParser()
+    # ap.add_argument("-o", "--orange", required=True, type=int, help="Orange number")
+    # args = vars(ap.parse_args())
+    # orange_num = args['orange']
+
+    for orange_num in range(7, 13):
+        equator_filename, poles_filename = f"or{orange_num}-equator", f"or{orange_num}-poles"
+        est_vol = estimate_volume(equator_filename, poles_filename)
+
+    # TODO: transform to some color space and do histogram equalization as in
+    # the psid lab
