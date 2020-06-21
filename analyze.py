@@ -277,7 +277,7 @@ def estimate_volume(equator_filename, poles_filename):
                                                 orange_diam_px=orange_diam_px, 
                                                 focal_length_px=FOCAL_LENGTH_PX)
 
-        logger.debug(f'Estimated real orange diameter: {orange_diameter:.1f} mm')
+        logger.info(f'Estimated real orange diameter: {orange_diameter:.1f} mm')
 
         #######################################################################
         # Draw
@@ -327,13 +327,14 @@ def estimate_volume(equator_filename, poles_filename):
 
         cv2.imwrite(f'{fn}-out{EXT}', im_with_keypoints)
         diameters.append(orange_diameter)
-        logger.info(f'Finished with one orange.\n')
+        logger.info(f'Finished with one orange.')
     
     ###########################################################################
     # FINAL CALC
     ###########################################################################
     orange_volume = calculate_orange_volume(diameters[0], diameters[1])
-    logger.info(f'Estimated real orange volume: {orange_volume:.1f} ml')
+    logger.info(f'Finished with orange {equator_filename}, {poles_filename}')
+    logger.info(f'Estimated real orange volume: {orange_volume:.1f} ml\n')
     return orange_volume
 
 
