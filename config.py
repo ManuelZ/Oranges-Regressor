@@ -1,25 +1,20 @@
 import numpy as np
+from pathlib import Path
+from utils import read_camera_parameters
 
+IMAGES_FOLDER = Path('./images')
 EXT = ".jpg"
 
 TARGET_WIDTH = 2448
 
-DEBUG = False
+DEBUG = True
 
-REAL_L, REAL_W = 240,150 # milimeters
+REAL_H, REAL_W = 250, 160 # milimeters
 
-# Camera parameters calculated with Matlab
-fx, fy = 2.9496e+03, 2.9535e+03 
-# Camera parameters calculated with Opencv
-# fx, fy = 2.59010722e+03, 2.58287227e+03 
-
+CAL_MTX, DIST = read_camera_parameters()
+fx = CAL_MTX[0, 0]
+fy = CAL_MTX[1, 1]
 FOCAL_LENGTH_PX = np.mean([fx, fy])
-
-CAL_MTX = np.array([[fx, 0, 1.64003469e+03],
-                    [0, fy, 1.20986771e+03],
-                    [0, 0, 1]])
-
-DIST = np.array([[9.81063604e-02, -3.04860599e-01, 3.62797741e-04, 3.14197889e-04, 3.30625745e-01]])
 
 
 HSV_LOW = (0,0,0)

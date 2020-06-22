@@ -4,6 +4,7 @@ import logging
 from itertools import combinations
 import argparse
 
+
 # External imports
 import cv2
 import numpy as np
@@ -16,15 +17,15 @@ from scipy.spatial.distance import euclidean
 
 # Local imports
 from setup_logger import logger
-from config import CAL_MTX
-from config import DIST
+from config import CAL_MTX, DIST, FOCAL_LENGTH_PX
 from config import TARGET_WIDTH
-from config import FOCAL_LENGTH_PX
-from config import REAL_L, REAL_W
+from config import REAL_H, REAL_W
 from config import DEBUG
 from config import EXT
 from config import HSV_LOW, HSV_HIGH
+from config import IMAGES_FOLDER
 from exceptions import BlobError
+from utils import draw_corners_in_image
 
 # Supress numpy scientific notation
 np.set_printoptions(precision=2, suppress=True, threshold=5)
@@ -36,48 +37,23 @@ def find_squares(im):
     """
     Return a list of keypoints with the centroids of the found squares.
     """
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(im, connectivity=8)
-    labels = labels.astype(np.uint8)
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     
-    new_stats = []
-    for i in range(num_labels):
-        blob = labels.copy()
-        blob[np.where(blob == i)] = 255
-        blob[np.where(blob != 255)] = 0
-        try:
-            area, perimeter, circularity, bbox_area = get_blob_properties(blob)
-            new_stats.append((area, perimeter, circularity, bbox_area, centroids[i][0], centroids[i][1]))
-        except BlobError:
-            pass
+    parameters =  cv2.aruco.DetectorParameters_create()
+    # Refine the corners
+    parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG # big effect
+    parameters.cornerRefinementWinSize  = 10 # no effect
+    parameters.cornerRefinementMaxIterations = 10000 # no effect
+    parameters.cornerRefinementMinAccuracy = 0.0001 # no effect
     
-    structured = np.array(new_stats, dtype=({ 'names' : ['area', 'perimeter', 'circularity', 'bbox_area', 'cx', 'cy'],
-                                              'formats' : ['f4', 'f4', 'f4', 'f4', 'f4', 'f4']
-                                            }))
-    unstructured = rfn.structured_to_unstructured(structured[['area', 'perimeter', 'circularity', 'bbox_area']])
-
-    if unstructured.shape[0] >= 4:
-        nn = NearestNeighbors(n_neighbors=4, algorithm='ball_tree')
-        model = nn.fit(unstructured)
-        indices = model.kneighbors(unstructured, return_distance=False)
-        # remove duplicate groups
-        results = np.array([list(item) for item in set(frozenset(item) for item in indices)])
-        
-        # Select the best group by minimizing the sum of std
-        min_std = np.inf
-        selected = None
-        for group in results:
-            d = np.std(unstructured[group], axis=0).sum()
-            if d < min_std:
-                min_std = d
-                selected = group
-        logger.debug(f'Selected group is: {selected}')
-    else:
-        logger.error("Not enough square blobs found")
-        sys.exit()
-
-    selected = structured[selected]
-    keypoints = [cv2.KeyPoint(x=row['cx'], y=row['cy'], _size=np.sqrt(row['area'])) for row in selected]
-    return keypoints
+    corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(im, aruco_dict, parameters=parameters)
+    
+    # There is one extra useless dimension in each corner
+    squares_centroids = np.array([np.mean(c[0,:,:], axis=0) for c in corners])
+    # temp_im = draw_corners_in_image(im, corners, ids, target_width=1000)
+    # cv2.imshow('', temp_im)
+    # cv2.waitKey(0)
+    return squares_centroids
 
 
 def find_orange(im):
@@ -142,11 +118,24 @@ def calculate_orange_volume(equator_diameter, poles_diameter=None):
 
 
 def get_reference_length_and_width(centroids):
-    # order coordinates clockwise
+    # Order coordinates in clockwise order
     tl, tr, br, bl = order_points(centroids)
-    w = euclidean(br, bl)
-    l = euclidean(tl, bl)
-    return l, w
+    # The 'four_point_transform' function from imutils assumes that the width
+    # and length of the new image will be the maximum respective width and 
+    # lengths of the given quadrilateral polygon. Hence, I do the same here.
+    bottom_width = int(euclidean(br, bl))
+    top_width = int(euclidean(tr, tl))
+    left_height = int(euclidean(bl, tl))
+    right_height = int(euclidean(br, tr))
+
+    logger.debug(f'Bottom width [px]: {bottom_width:.1f} px')
+    logger.debug(f'Top width [px]: {top_width:.1f} px')
+    logger.debug(f'Left height [px]: {left_height:.1f} px')
+    logger.debug(f'Right height [px]: {right_height:.1f} px')
+
+    width_px = max(bottom_width, top_width)
+    height_px = max(left_height, right_height)
+    return height_px, width_px
 
 
 def get_blob_properties(blob):
@@ -159,8 +148,8 @@ def get_blob_properties(blob):
     if area < 10: raise BlobError
     perimeter = cv2.arcLength(cnt, closed=True)
     circularity = (4 * np.pi * area) / np.power(perimeter, 2)
-    x,y,w,h = cv2.boundingRect(cnt)
-    bbox_area = w * h
+    x,y,width_px,h = cv2.boundingRect(cnt)
+    bbox_area = width_px * h
     return area, perimeter, circularity, bbox_area
 
 
@@ -209,14 +198,26 @@ def estimate_volume(equator_filename, poles_filename):
             Processer(f'{fn}{EXT}', TARGET_WIDTH, CAL_MTX, DIST, debug=DEBUG)
 
         #######################################################################
-        # Find Orange
+        # Find squares centroids
         #######################################################################
-        (
+        im = (
             processer
                 .resize()
-                .blur(3)
-                .show("Orange")
                 .undistort()
+                .blur(3)
+                .get_processed_image()
+        )
+
+        squares_centroids = find_squares(im)
+
+
+        #######################################################################
+        # Find Orange
+        #######################################################################
+        im = (
+            processer
+                .show("Orange")
+                .perspective_transform(squares_centroids)
                 .show("Orange")
                 .to_hsv()
                 .show("Orange")
@@ -224,59 +225,33 @@ def estimate_volume(equator_filename, poles_filename):
                 .show("Orange")
                 .negate()
                 .show("Orange")
-                .open(size=10, iterations=5, element='circle')
-                .close(size=10, iterations=5, element='circle')
+                .open(size=3, iterations=10, element='circle')
+                .close(size=7, iterations=7, element='circle')
                 .show("Orange")
+                # TODO: show thresholded orange instead of the blob
+                .get_processed_image()
         )
-        im = processer.get_processed_image()
+
         orange_kpts, orange_diam_px = find_orange(im)
         orange_centroids = np.array([kp.pt for kp in orange_kpts])
-
-        #######################################################################
-        # Find squares
-        #######################################################################
-        (
-            processer
-                .reset()
-                .resize()
-                .blur(3)
-                #.show('Squares')
-                .undistort()
-                #.show('Squares')
-                .to_gray()
-                #.show('Squares')
-                .binarize(method='otsu')
-                #.show('Squares')
-                .open(size=10, iterations=5, element='rectangle')
-                .close(size=5, iterations=5, element='rectangle')
-                #.show('Squares')
-        )
-        im = processer.get_processed_image()
-        squares_kpts = find_squares(im)
-        squares_centroids = np.array([kp.pt for kp in squares_kpts])
-
-        #
-        # Length and Width
-        #
-        l,w = get_reference_length_and_width(squares_centroids)
-        logger.debug(f'Squares length: {l:.1f} px; Squares width: {w:.1f} px')
 
 
         #######################################################################
         # Transform pixels to mm
         #######################################################################
-        mm_per_px1 = REAL_L / l
-        mm_per_px2 = REAL_W / w
-        logger.debug(f'Reference [mm]: {REAL_L:.1f} mm')
-        logger.debug(f'Reference [px]: {l:.1f} px')
-        logger.debug(f'Image orange diameter: {orange_diam_px:.1f} px')
-        logger.debug(f'Focal length: {FOCAL_LENGTH_PX:.1f} px')
+        height_px, width_px = im.shape
+        px_per_mm_height = height_px / REAL_H
+        px_per_mm_width = width_px / REAL_W
+        logger.debug(f'{px_per_mm_height:.1f} px/mm [height]')
+        logger.debug(f'{px_per_mm_width:.1f} px/mm [width]')
 
-        orange_diameter = calc_orange_real_diam(ref_mm=REAL_L, 
-                                                ref_px=l, 
+        orange_diameter = calc_orange_real_diam(ref_mm=REAL_H, 
+                                                ref_px=height_px, 
                                                 orange_diam_px=orange_diam_px, 
                                                 focal_length_px=FOCAL_LENGTH_PX)
-
+        
+        logger.debug(f'Focal length: {FOCAL_LENGTH_PX:.1f} px')
+        logger.debug(f'Image orange diameter: {orange_diam_px:.1f} px')
         logger.info(f'Estimated real orange diameter: {orange_diameter:.1f} mm')
 
         #######################################################################
@@ -287,32 +262,19 @@ def estimate_volume(equator_filename, poles_filename):
                     .reset()
                     .resize()
                     .undistort()
+                    .perspective_transform(squares_centroids)
                     .get_processed_image()
             )
 
-        # Mark the squares and orange
+        # Mark the orange
         im_with_keypoints = drawKeyPts(im, orange_kpts, (0,0,255), 10)
-        im_with_keypoints = \
-            cv2.drawKeypoints(im_with_keypoints, squares_kpts, np.array([]), 
-                              (0,255,0), 
-                              cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS) 
-
-        # Draw squares locations
-        for kp in squares_kpts:
-            cv2.putText(im_with_keypoints,
-                        text = f"{kp.pt[0]:.0f}, {kp.pt[1]:.0f}", 
-                        org = (int(kp.pt[0] - 30), int(kp.pt[1] - 30)), 
-                        fontFace = cv2.FONT_HERSHEY_SIMPLEX, 
-                        fontScale = 1.5, 
-                        color = (0,0,255), 
-                        thickness = 5)
 
         # Draw lines between squares
-        tl, tr, br, bl = order_points(squares_centroids)
-        draw_line_with_long(im_with_keypoints, tl, tr, mm_per_px1)
-        draw_line_with_long(im_with_keypoints, br, tr, mm_per_px1)
-        draw_line_with_long(im_with_keypoints, bl, br, mm_per_px1)
-        draw_line_with_long(im_with_keypoints, bl, tl, mm_per_px1)
+        # tl, tr, br, bl = order_points(squares_centroids)
+        # draw_line_with_long(im_with_keypoints, tl, tr, mm_per_px1)
+        # draw_line_with_long(im_with_keypoints, br, tr, mm_per_px1)
+        # draw_line_with_long(im_with_keypoints, bl, br, mm_per_px1)
+        # draw_line_with_long(im_with_keypoints, bl, tl, mm_per_px1)
 
         # Draw orange diameter
         orange_diam_text_x = int(orange_centroids[0][0])
@@ -344,8 +306,9 @@ if __name__ == '__main__':
     # args = vars(ap.parse_args())
     # orange_num = args['orange']
 
-    for orange_num in range(7, 13):
-        equator_filename, poles_filename = f"or{orange_num}-equator", f"or{orange_num}-poles"
+    for orange_num in range(13, 14):
+        equator_filename = str(IMAGES_FOLDER / f"or{orange_num}-equator")
+        poles_filename = str(IMAGES_FOLDER / f"or{orange_num}-poles")
         est_vol = estimate_volume(equator_filename, poles_filename)
 
     # TODO: transform to some color space and do histogram equalization as in
