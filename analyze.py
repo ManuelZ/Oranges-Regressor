@@ -202,8 +202,8 @@ def estimate_volume(equator_filename, poles_filename):
         #######################################################################
         im = (
             processer
-                .resize()
                 .undistort()
+                .resize()
                 .blur(3)
                 .get_processed_image()
         )
@@ -259,9 +259,9 @@ def estimate_volume(equator_filename, poles_filename):
         #######################################################################
         im = (
                 processer
+                    .undistort()
                     .reset()
                     .resize()
-                    .undistort()
                     .perspective_transform(squares_centroids)
                     .get_processed_image()
             )
